@@ -92,7 +92,15 @@ def update_task(task_id):
         if 'project' in data:
             task.project = data['project']
         if 'due_date' in data:
-            task.due_date = datetime.fromisoformat(data['due_date']) if data['due_date'] else None
+            if data['due_date']:
+                try:
+                    # Handle ISO format date string
+                    task.due_date = datetime.fromisoformat(data['due_date'].replace('Z', '+00:00'))
+                except ValueError:
+                    # If ISO format fails, try parsing as date only
+                    task.due_date = datetime.strptime(data['due_date'], '%Y-%m-%d')
+            else:
+                task.due_date = None
             
         db.session.commit()
         return jsonify({'success': True, 'task': task.to_dict()})

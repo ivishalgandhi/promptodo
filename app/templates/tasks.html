@@ -70,7 +70,7 @@
                                 data-tags="{{ task.tags|map(attribute='name')|join(' ') }}"
                                 data-status="{{ task.status }}"
                                 data-task-id="{{ task.id }}">
-                                <td class="task-content">
+                                <td class="task-content" data-field="content" data-original-content="{{ task.content }}">
                                     {{ task.content }}
                                     <div class="mt-1">
                                         {% for tag in task.tags %}
@@ -78,10 +78,10 @@
                                         {% endfor %}
                                     </div>
                                 </td>
-                                <td>{{ task.project or '-' }}</td>
-                                <td>{{ task.milestone or '-' }}</td>
-                                <td>{{ task.due_date.strftime('%Y-%m-%d') if task.due_date else 'No due date' }}</td>
-                                <td>
+                                <td data-field="project">{{ task.project or '-' }}</td>
+                                <td data-field="milestone">{{ task.milestone or '-' }}</td>
+                                <td data-field="due_date" data-raw-date="{{ task.due_date }}">{{ task.due_date.strftime('%Y-%m-%d') if task.due_date else 'No due date' }}</td>
+                                <td data-field="priority">
                                     {% if task.priority %}
                                     <span class="priority-badge priority-{{ task.priority.lower() }}">
                                         <i class="fas fa-flag"></i>
@@ -183,30 +183,72 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function makeEditable(cell) {
-    const currentContent = cell.textContent.trim();
-    const taskId = cell.closest('tr').dataset.taskId;
+    if (cell.getAttribute('data-editing') === 'true') return;
     
-    // Create input element
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = currentContent;
-    input.className = 'form-control';
+    const originalContent = cell.textContent.trim();
+    const taskId = cell.closest('tr').getAttribute('data-task-id');
+    const field = cell.getAttribute('data-field');
+    let input;
     
-    // Replace cell content with input
-    cell.innerHTML = '';
+    // Mark as editing
+    cell.setAttribute('data-editing', 'true');
+    
+    if (field === 'priority') {
+        input = document.createElement('select');
+        input.className = 'form-select form-select-sm';
+        input.innerHTML = `
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+        `;
+        input.value = originalContent.toLowerCase();
+    } else if (field === 'due_date') {
+        input = document.createElement('input');
+        input.type = 'date';
+        input.className = 'form-control form-control-sm';
+        
+        // Get the raw date from the data attribute
+        const rawDate = cell.getAttribute('data-raw-date');
+        if (rawDate) {
+            const date = new Date(rawDate);
+            if (!isNaN(date.getTime())) {
+                input.value = date.toISOString().split('T')[0];
+            }
+        }
+    } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm';
+        input.value = originalContent;
+    }
+
+    cell.textContent = '';
     cell.appendChild(input);
     input.focus();
-    
-    // Handle save on enter or blur
+
     function saveEdit() {
-        const newContent = input.value.trim();
-        if (newContent && newContent !== currentContent) {
-            updateTask(taskId, newContent, cell);
-        } else {
-            cell.innerHTML = currentContent;
+        let newValue = input.value.trim();
+        
+        // Special handling for date values
+        if (field === 'due_date' && newValue) {
+            const date = new Date(newValue + 'T00:00:00Z');
+            if (!isNaN(date.getTime())) {
+                newValue = date.toISOString();
+            }
         }
+        
+        if (newValue !== originalContent) {
+            updateTask(taskId, newValue, cell);
+        } else {
+            if (field === 'due_date') {
+                cell.innerHTML = formatDate(cell.getAttribute('data-raw-date')) || 'Set date';
+            } else {
+                cell.textContent = originalContent;
+            }
+        }
+        cell.removeAttribute('data-editing');
     }
-    
+
     input.addEventListener('blur', saveEdit);
     input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
@@ -216,21 +258,61 @@ function makeEditable(cell) {
     });
 }
 
-function updateTask(taskId, content, cell) {
+function formatDate(dateStr) {
+    if (!dateStr) return null;
+    
+    try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return null;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const taskDate = new Date(date);
+        taskDate.setHours(0, 0, 0, 0);
+
+        if (taskDate.getTime() === today.getTime()) {
+            return 'Today';
+        } else if (taskDate.getTime() === tomorrow.getTime()) {
+            return 'Tomorrow';
+        }
+
+        // For all other dates, show in format "MMM D, YYYY"
+        return date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    } catch (error) {
+        console.error('Error formatting date:', error);
+        return dateStr;
+    }
+}
+
+function updateTask(taskId, value, cell) {
+    const field = cell.getAttribute('data-field');
+    
     fetch(`/update_task/${taskId}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content: content })
+        body: JSON.stringify({ [field]: value })
     })
-    .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
         if (data.success) {
-            cell.innerHTML = content;
+            if (field === 'due_date') {
+                cell.setAttribute('data-raw-date', data.task.due_date || '');
+                cell.innerHTML = formatDate(data.task.due_date) || 'Set date';
+            } else if (field === 'priority') {
+                cell.textContent = value.charAt(0).toUpperCase() + value.slice(1);
+            } else {
+                cell.textContent = value;
+            }
         } else {
             throw new Error(data.error || 'Failed to update task');
         }
@@ -238,7 +320,8 @@ function updateTask(taskId, content, cell) {
     .catch(error => {
         console.error('Error:', error);
         alert('Failed to update task: ' + error.message);
-        cell.innerHTML = cell.dataset.originalContent;
+        // Restore original content
+        cell.textContent = cell.getAttribute('data-original-content');
     });
 }
 
@@ -304,7 +387,7 @@ function getCellValue(row, column) {
 
 function getColumnIndex(column) {
     const headers = document.querySelectorAll('#tasksTable th');
-    for (let i = 0; i < headers.length; i++) {
+    for (let i = 0; i <headers.length; i++) {
         if (headers[i].dataset.sort === column) {
             return i + 1;
         }

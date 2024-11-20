@@ -31,7 +31,7 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h5 class="card-title mb-0">Your Tasks</h5>
-                        <div class="btn-group mb-3" role="group">
+                        <div class="btn-group" role="group">
                             <button onclick="filterTasks('all')" class="btn btn-outline-primary active">All</button>
                             <button onclick="filterTasks('pending')" class="btn btn-outline-primary">Pending</button>
                             <button onclick="filterTasks('in_progress')" class="btn btn-outline-primary">In Progress</button>
@@ -166,9 +166,9 @@
     }
 
     function createTaskTable(tasks) {
-        const taskList = document.getElementById('taskList');
         const table = document.createElement('table');
-        table.className = 'table';
+        table.className = 'table table-hover';
+        table.id = 'tasksTable';
         
         // Create table header
         const thead = document.createElement('thead');
@@ -192,6 +192,7 @@
         });
         table.appendChild(tbody);
         
+        const taskList = document.getElementById('taskList');
         taskList.innerHTML = '';
         taskList.appendChild(table);
     }
@@ -205,7 +206,6 @@
         const status = task.status || 'pending';
         const priority = (task.priority || 'medium').toLowerCase();
         const project = task.project || 'Inbox';
-        const dueDate = task.due_date ? new Date(task.due_date).toISOString().split('T')[0] : '';
         
         tr.innerHTML = `
             <td>
@@ -217,7 +217,8 @@
             <td>
                 <span class="task-content ${status === 'completed' ? 'text-decoration-line-through' : ''}" 
                       onclick="makeEditable(this, 'text')" 
-                      data-task-id="${task.id}">${task.content}</span>
+                      data-task-id="${task.id}"
+                      data-field="content">${task.content}</span>
                 ${formatTags(task.tags)}
             </td>
             <td>
@@ -236,7 +237,8 @@
                 <span class="editable-field"
                       onclick="makeEditable(this, 'date')"
                       data-task-id="${task.id}"
-                      data-field="due_date">${formatDate(task.due_date) || 'Set date'}</span>
+                      data-field="due_date"
+                      data-raw-date="${task.due_date || ''}">${formatDate(task.due_date) || 'Set date'}</span>
             </td>
             <td>
                 <select class="form-select form-select-sm" 
@@ -258,13 +260,17 @@
     }
 
     function makeEditable(element, type) {
+        if (element.getAttribute('data-editing') === 'true') return;
+        
         const currentValue = element.textContent.trim();
         const taskId = element.dataset.taskId;
         const field = element.dataset.field;
         let input;
-
+        
+        // Mark as editing
+        element.setAttribute('data-editing', 'true');
+        
         if (type === 'priority') {
-            // Create priority select
             input = document.createElement('select');
             input.className = 'form-select form-select-sm';
             input.innerHTML = `
@@ -274,38 +280,55 @@
             `;
             input.value = currentValue.toLowerCase();
         } else if (type === 'project') {
-            // Create project input
             input = document.createElement('input');
             input.type = 'text';
             input.className = 'form-control form-control-sm';
             input.value = currentValue;
         } else if (type === 'date') {
-            // Create date input
             input = document.createElement('input');
             input.type = 'date';
             input.className = 'form-control form-control-sm';
-            input.value = currentValue === 'Set date' ? '' : new Date(currentValue).toISOString().split('T')[0];
+            
+            // Get the raw date from the data attribute
+            const rawDate = element.dataset.rawDate;
+            if (rawDate) {
+                const date = new Date(rawDate);
+                if (!isNaN(date.getTime())) {
+                    input.value = date.toISOString().split('T')[0];
+                }
+            }
         } else {
-            // Default text input
             input = document.createElement('input');
             input.type = 'text';
             input.className = 'form-control form-control-sm';
             input.value = currentValue;
         }
         
-        // Replace element with input
         element.innerHTML = '';
         element.appendChild(input);
         input.focus();
         
-        // Handle save on enter or blur
         function saveEdit() {
-            const newValue = input.value.trim();
+            let newValue = input.value.trim();
+            
+            // Special handling for date values
+            if (type === 'date' && newValue) {
+                const date = new Date(newValue + 'T00:00:00Z');
+                if (!isNaN(date.getTime())) {
+                    newValue = date.toISOString();
+                }
+            }
+            
             if (newValue !== currentValue) {
                 updateTaskField(taskId, field || 'content', newValue, element);
             } else {
-                element.innerHTML = currentValue;
+                if (type === 'date') {
+                    element.innerHTML = formatDate(element.dataset.rawDate) || 'Set date';
+                } else {
+                    element.innerHTML = currentValue;
+                }
             }
+            element.removeAttribute('data-editing');
         }
         
         input.addEventListener('blur', saveEdit);
@@ -318,8 +341,6 @@
     }
 
     function updateTaskField(taskId, field, value, element) {
-        const originalContent = element ? element.textContent : null;
-        
         fetch(`/update_task/${taskId}`, {
             method: 'POST',
             headers: {
@@ -335,14 +356,14 @@
             if (data.success) {
                 if (element) {
                     if (field === 'due_date') {
-                        element.innerHTML = formatDate(value) || 'Set date';
+                        element.dataset.rawDate = data.task.due_date || '';
+                        element.innerHTML = formatDate(data.task.due_date) || 'Set date';
                     } else if (field === 'priority') {
                         element.innerHTML = value.charAt(0).toUpperCase() + value.slice(1);
                     } else {
                         element.innerHTML = value;
                     }
                 }
-                // Refresh the task list if status was changed
                 if (field === 'status') {
                     loadTasks();
                 }
@@ -354,9 +375,48 @@
             console.error('Error:', error);
             alert('Failed to update task: ' + error.message);
             if (element) {
-                element.innerHTML = originalContent;
+                if (field === 'due_date') {
+                    element.innerHTML = formatDate(element.dataset.rawDate) || 'Set date';
+                } else {
+                    element.innerHTML = currentValue;
+                }
             }
+            loadTasks(); // Reload to restore the original state
         });
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return null;
+        
+        try {
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return null;
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            
+            const taskDate = new Date(date);
+            taskDate.setHours(0, 0, 0, 0);
+
+            if (taskDate.getTime() === today.getTime()) {
+                return 'Today';
+            } else if (taskDate.getTime() === tomorrow.getTime()) {
+                return 'Tomorrow';
+            }
+
+            // For all other dates, show in format "MMM D, YYYY"
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+        } catch (error) {
+            console.error('Error formatting date:', error);
+            return dateStr;
+        }
     }
 
     function filterTasks(filter) {
@@ -396,26 +456,6 @@
             default:
                 return '';
         }
-    }
-
-    function formatDate(dateStr) {
-        if (!dateStr) return null;
-        const date = new Date(dateStr);
-        const today = new Date();
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        if (date.toDateString() === today.toDateString()) {
-            return 'Today ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        } else if (date.toDateString() === tomorrow.toDateString()) {
-            return 'Tomorrow ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        }
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
     }
 
     function formatTags(tags) {
