@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">Task Management</h1>
+        
+        <div class="mb-4">
+            <div class="btn-group me-3" role="group">
+                <a href="{{ url_for('main.tasks', status='all') }}" 
+                   class="btn btn-outline-primary {% if current_status == 'all' %}active{% endif %}">
+                    All Tasks
+                </a>
+                <a href="{{ url_for('main.tasks', status='pending') }}"
+                   class="btn btn-outline-warning {% if current_status == 'pending' %}active{% endif %}">
+                    Pending
+                </a>
+                <a href="{{ url_for('main.tasks', status='in_progress') }}"
+                   class="btn btn-outline-info {% if current_status == 'in_progress' %}active{% endif %}">
+                    In Progress
+                </a>
+                <a href="{{ url_for('main.tasks', status='completed') }}"
+                   class="btn btn-outline-success {% if current_status == 'completed' %}active{% endif %}">
+                    Completed
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <input type="text" id="projectFilter" class="form-control" placeholder="Filter by Project">
+                    </div>
+                    <div class="col-md-3">
+                        <input type="text" id="milestoneFilter" class="form-control" placeholder="Filter by Milestone">
+                    </div>
+                    <div class="col-md-3">
+                        <select id="priorityFilter" class="form-select">
+                            <option value="">All Priorities</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <input type="text" id="tagFilter" class="form-control" placeholder="Filter by Tag">
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover" id="tasksTable">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort="content">Task</th>
+                                <th class="sortable" data-sort="project">Project</th>
+                                <th class="sortable" data-sort="milestone">Milestone</th>
+                                <th class="sortable" data-sort="due_date">Due Date</th>
+                                <th class="sortable" data-sort="priority">Priority</th>
+                                <th class="sortable" data-sort="status">Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr class="task-row" 
+                                data-project="{{ task.project or '' }}"
+                                data-milestone="{{ task.milestone or '' }}"
+                                data-priority="{{ task.priority or '' }}"
+                                data-tags="{{ task.tags|map(attribute='name')|join(' ') }}"
+                                data-status="{{ task.status }}"
+                                data-task-id="{{ task.id }}">
+                                <td class="task-content">
+                                    {{ task.content }}
+                                    <div class="mt-1">
+                                        {% for tag in task.tags %}
+                                        <span class="badge bg-secondary">#{{ tag.name }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </td>
+                                <td>{{ task.project or '-' }}</td>
+                                <td>{{ task.milestone or '-' }}</td>
+                                <td>{{ task.due_date.strftime('%Y-%m-%d') if task.due_date else 'No due date' }}</td>
+                                <td>
+                                    {% if task.priority %}
+                                    <span class="priority-badge priority-{{ task.priority.lower() }}">
+                                        <i class="fas fa-flag"></i>
+                                        {{ task.priority }}
+                                    </span>
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge {% if task.status == 'pending' %}bg-warning{% elif task.status == 'completed' %}bg-success{% else %}bg-info{% endif %}">
+                                        {{ task.status }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="dropdown">
+                                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                            Actions
+                                        </button>
+                                        <ul class="dropdown-menu">
+                                            <li><a class="dropdown-item" href="#" onclick="updateStatus({{ task.id }}, 'pending')">Mark Pending</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="updateStatus({{ task.id }}, 'in_progress')">Mark In Progress</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="updateStatus({{ task.id }}, 'completed')">Mark Complete</a></li>
+                                        </ul>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Task Modal -->
+<div class="modal fade" id="editTaskModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Task</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTaskForm">
+                    <div class="mb-3">
+                        <label for="editTaskInput" class="form-label">Task Description:</label>
+                        <textarea class="form-control" id="editTaskInput" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="saveTask()">Save changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentSort = { column: null, direction: 'asc' };
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize filters
+    const projectFilter = document.getElementById('projectFilter');
+    const milestoneFilter = document.getElementById('milestoneFilter');
+    const priorityFilter = document.getElementById('priorityFilter');
+    const tagFilter = document.getElementById('tagFilter');
+
+    // Add event listeners for filters
+    projectFilter.addEventListener('input', filterTasks);
+    milestoneFilter.addEventListener('input', filterTasks);
+    priorityFilter.addEventListener('change', filterTasks);
+    tagFilter.addEventListener('input', filterTasks);
+
+    // Initialize sorting
+    document.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const column = th.dataset.sort;
+            if (currentSort.column === column) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = column;
+                currentSort.direction = 'asc';
+            }
+            sortTasks(column, currentSort.direction);
+            updateSortIndicators();
+        });
+    });
+
+    // Add click handlers for inline editing
+    document.querySelectorAll('.task-content').forEach(cell => {
+        cell.addEventListener('click', () => makeEditable(cell));
+    });
+});
+
+function makeEditable(cell) {
+    const currentContent = cell.textContent.trim();
+    const taskId = cell.closest('tr').dataset.taskId;
+    
+    // Create input element
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentContent;
+    input.className = 'form-control';
+    
+    // Replace cell content with input
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    
+    // Handle save on enter or blur
+    function saveEdit() {
+        const newContent = input.value.trim();
+        if (newContent && newContent !== currentContent) {
+            updateTask(taskId, newContent, cell);
+        } else {
+            cell.innerHTML = currentContent;
+        }
+    }
+    
+    input.addEventListener('blur', saveEdit);
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveEdit();
+        }
+    });
+}
+
+function updateTask(taskId, content, cell) {
+    fetch(`/update_task/${taskId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content: content })
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            cell.innerHTML = content;
+        } else {
+            throw new Error(data.error || 'Failed to update task');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to update task: ' + error.message);
+        cell.innerHTML = cell.dataset.originalContent;
+    });
+}
+
+function filterTasks() {
+    const projectValue = projectFilter.value.toLowerCase();
+    const milestoneValue = milestoneFilter.value.toLowerCase();
+    const priorityValue = priorityFilter.value.toLowerCase();
+    const tagValue = tagFilter.value.toLowerCase();
+    
+    document.querySelectorAll('#tasksTable tbody tr').forEach(row => {
+        const project = (row.dataset.project || '').toLowerCase();
+        const milestone = (row.dataset.milestone || '').toLowerCase();
+        const priority = (row.dataset.priority || '').toLowerCase();
+        const tags = (row.dataset.tags || '').toLowerCase();
+        
+        const matchesProject = !projectValue || project.includes(projectValue);
+        const matchesMilestone = !milestoneValue || milestone.includes(milestoneValue);
+        const matchesPriority = !priorityValue || priority === priorityValue;
+        const matchesTags = !tagValue || tags.includes(tagValue);
+        
+        row.style.display = (matchesProject && matchesMilestone && matchesPriority && matchesTags) ? '' : 'none';
+    });
+}
+
+function sortTasks(column, direction) {
+    const tbody = document.querySelector('#tasksTable tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    const sortedRows = rows.sort((a, b) => {
+        let aVal = getCellValue(a, column);
+        let bVal = getCellValue(b, column);
+        
+        // Handle date comparison
+        if (column === 'due_date') {
+            aVal = aVal === 'No due date' ? new Date(8640000000000000) : new Date(aVal);
+            bVal = bVal === 'No due date' ? new Date(8640000000000000) : new Date(bVal);
+        }
+        
+        // Handle priority comparison
+        if (column === 'priority') {
+            const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+            aVal = priorityOrder[aVal.toLowerCase()] || 0;
+            bVal = priorityOrder[bVal.toLowerCase()] || 0;
+        }
+        
+        if (aVal === bVal) return 0;
+        
+        const comparison = aVal > bVal ? 1 : -1;
+        return direction === 'asc' ? comparison : -comparison;
+    });
+    
+    // Clear and re-append sorted rows
+    while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+    }
+    tbody.append(...sortedRows);
+}
+
+function getCellValue(row, column) {
+    const cell = row.querySelector(`td:nth-child(${getColumnIndex(column)})`);
+    return cell ? cell.textContent.trim() : '';
+}
+
+function getColumnIndex(column) {
+    const headers = document.querySelectorAll('#tasksTable th');
+    for (let i = 0; i < headers.length; i++) {
+        if (headers[i].dataset.sort === column) {
+            return i + 1;
+        }
+    }
+    return 1;
+}
+
+function updateSortIndicators() {
+    document.querySelectorAll('th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === currentSort.column) {
+            th.classList.add(`sort-${currentSort.direction}`);
+        }
+    });
+}
+
+function updateStatus(taskId, status) {
+    if (!taskId || !status) {
+        console.error('Missing task ID or status');
+        return;
+    }
+    
+    fetch(`/update_task/${taskId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: status })
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            throw new Error(data.error || 'Failed to update task status');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to update task status: ' + error.message);
+    });
+}
+</script>
+
+<style>
+.sortable {
+    cursor: pointer;
+    position: relative;
+}
+
+.sortable::after {
+    content: '↕';
+    position: absolute;
+    right: 8px;
+    color: #999;
+}
+
+.sortable.sort-asc::after {
+    content: '↑';
+    color: #000;
+}
+
+.sortable.sort-desc::after {
+    content: '↓';
+    color: #000;
+}
+
+.task-content {
+    cursor: pointer;
+}
+
+.task-content:hover {
+    background-color: #f8f9fa;
+    border-radius: 4px;
+}
+
+.priority-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.priority-high {
+    background-color: #dc3545;
+    color: white;
+}
+
+.priority-medium {
+    background-color: #ffc107;
+    color: black;
+}
+
+.priority-low {
+    background-color: #28a745;
+    color: white;
+}
+</style>
+{% endblock %}

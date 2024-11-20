@@ -1,0 +1,55 @@
+/* Editable fields styling */
+.editable-field {
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    transition: background-color 0.2s;
+}
+
+.editable-field:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Priority colors */
+.priority-high {
+    color: #dc3545;
+}
+
+.priority-medium {
+    color: #ffc107;
+}
+
+.priority-low {
+    color: #28a745;
+}
+
+/* Form controls */
+.form-control-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.form-select-sm {
+    padding: 0.25rem 2rem 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+/* Task status */
+.task-completed {
+    opacity: 0.6;
+}
+
+/* Table styling */
+.table td {
+    vertical-align: middle;
+}
+
+/* Tags styling */
+.task-tag {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    margin: 0.1rem;
+    background-color: #e9ecef;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
