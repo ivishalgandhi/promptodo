@@ -38,6 +38,34 @@
                             <button onclick="filterTasks('completed')" class="btn btn-outline-primary">Completed</button>
                         </div>
                     </div>
+                    
+                    <!-- Search and Filter Bar -->
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="search-container">
+                                <input type="text" 
+                                       id="searchInput" 
+                                       class="form-control" 
+                                       placeholder="Search tasks..."
+                                       autocomplete="off">
+                                <i class="fas fa-search search-icon"></i>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="d-flex gap-2 justify-content-end">
+                                <select id="projectFilter" class="form-select w-auto">
+                                    <option value="">All Projects</option>
+                                </select>
+                                <select id="priorityFilter" class="form-select w-auto">
+                                    <option value="">All Priorities</option>
+                                    <option value="high">High</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="low">Low</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div id="taskList" class="table-responsive">
                         <!-- Tasks will be loaded here -->
                     </div>
@@ -53,17 +81,162 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        .search-container {
+            position: relative;
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6c757d;
+        }
+
+        #searchInput {
+            padding-right: 30px;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px;
+            border-radius: 2px;
+        }
+    </style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // Load tasks when the page loads
-    document.addEventListener('DOMContentLoaded', () => {
+    let allTasks = []; // Store all tasks
+    let searchTimeout = null;
+    let currentFilter = 'all';
+
+    document.addEventListener('DOMContentLoaded', function() {
         loadTasks();
+        
+        // Add search event listener
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('input', handleSearch);
+        
+        // Add filter event listeners
+        document.getElementById('projectFilter').addEventListener('change', applyFilters);
+        document.getElementById('priorityFilter').addEventListener('change', applyFilters);
+        
         // Set initial filter button state
         document.querySelector('.btn-group .btn:first-child').classList.add('active');
     });
-    let currentFilter = 'all';
+
+    function handleSearch(event) {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            applyFilters();
+        }, 300); // Debounce search for 300ms
+    }
+
+    function applyFilters() {
+        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+        const projectFilter = document.getElementById('projectFilter').value.toLowerCase();
+        const priorityFilter = document.getElementById('priorityFilter').value.toLowerCase();
+        
+        const filteredTasks = allTasks.filter(task => {
+            const matchesSearch = !searchTerm || 
+                task.content.toLowerCase().includes(searchTerm) ||
+                (task.project && task.project.toLowerCase().includes(searchTerm)) ||
+                (task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm)));
+                
+            const matchesProject = !projectFilter || 
+                (task.project && task.project.toLowerCase() === projectFilter);
+                
+            const matchesPriority = !priorityFilter || 
+                (task.priority && task.priority.toLowerCase() === priorityFilter);
+            
+            return matchesSearch && matchesProject && matchesPriority;
+        });
+        
+        displayFilteredTasks(filteredTasks, searchTerm);
+    }
+
+    function displayFilteredTasks(tasks, searchTerm) {
+        createTaskTable(tasks);
+        
+        if (searchTerm) {
+            highlightSearchTerm(searchTerm);
+        }
+    }
+
+    function highlightSearchTerm(term) {
+        if (!term) return;
+        
+        const taskList = document.getElementById('taskList');
+        const textNodes = [];
+        
+        function getTextNodes(node) {
+            if (node.nodeType === 3) {
+                textNodes.push(node);
+            } else {
+                for (let child of node.childNodes) {
+                    getTextNodes(child);
+                }
+            }
+        }
+        
+        getTextNodes(taskList);
+        
+        textNodes.forEach(node => {
+            const text = node.nodeValue;
+            if (text.toLowerCase().includes(term.toLowerCase())) {
+                const span = document.createElement('span');
+                const regex = new RegExp(`(${term})`, 'gi');
+                span.innerHTML = text.replace(regex, '<span class="highlight">$1</span>');
+                node.parentNode.replaceChild(span, node);
+            }
+        });
+    }
+
+    function loadTasks() {
+        fetch('/tasks', {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Network response was not ok');
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                allTasks = data.tasks; // Store tasks globally
+                createTaskTable(data.tasks);
+                updateProjectFilter(data.tasks);
+            } else {
+                throw new Error(data.error || 'Failed to load tasks');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '<p class="text-center text-danger my-4">Error loading tasks: ' + error.message + '</p>';
+        });
+    }
+
+    function updateProjectFilter(tasks) {
+        const projectFilter = document.getElementById('projectFilter');
+        const projects = new Set(tasks.map(task => task.project).filter(Boolean));
+        
+        // Clear existing options except the first one
+        while (projectFilter.options.length > 1) {
+            projectFilter.remove(1);
+        }
+        
+        // Add new options
+        projects.forEach(project => {
+            const option = document.createElement('option');
+            option.value = project.toLowerCase();
+            option.textContent = project;
+            projectFilter.appendChild(option);
+        });
+    }
 
     function handleTaskSubmit(event) {
         event.preventDefault();
@@ -123,48 +296,6 @@
         return false;
     }
 
-    function loadTasks() {
-        const taskList = document.getElementById('taskList');
-        taskList.innerHTML = '<div class="text-center my-4"><i class="fas fa-spinner fa-spin"></i> Loading tasks...</div>';
-
-        fetch('/tasks', {
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (!data.success) {
-                throw new Error(data.error || 'Error loading tasks');
-            }
-            
-            if (!data.tasks || data.tasks.length === 0) {
-                taskList.innerHTML = '<p class="text-center text-muted my-4">No tasks found. Add your first task above!</p>';
-                return;
-            }
-
-            const filteredTasks = currentFilter === 'all' 
-                ? data.tasks 
-                : data.tasks.filter(task => task.status === currentFilter);
-
-            if (filteredTasks.length === 0) {
-                taskList.innerHTML = '<p class="text-center text-muted my-4">No tasks found for the selected filter.</p>';
-                return;
-            }
-
-            createTaskTable(filteredTasks);
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            taskList.innerHTML = '<p class="text-center text-danger my-4">Error loading tasks: ' + error.message + '</p>';
-        });
-    }
-
     function createTaskTable(tasks) {
         const table = document.createElement('table');
         table.className = 'table table-hover';
@@ -202,7 +333,6 @@
         tr.dataset.taskId = task.id;
         tr.className = task.status === 'completed' ? 'opacity-50' : '';
         
-        // Default values for null/undefined fields
         const status = task.status || 'pending';
         const priority = (task.priority || 'medium').toLowerCase();
         const project = task.project || 'Inbox';
